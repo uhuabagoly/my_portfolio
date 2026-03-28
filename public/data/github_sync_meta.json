@@ -1,0 +1,10 @@
+{
+    "status": "error",
+    "last_synced": "2026-03-28T21:57:45+00:00",
+    "imported_count": 0,
+    "repo_count": 0,
+    "manifest_count": 0,
+    "username": "uhuabagoly",
+    "cache_file": "data/projects.json",
+    "message": "GitHub request failed for https://api.github.com/users/uhuabagoly/repos?sort=updated&direction=desc&type=owner&per_page=100&page=1"
+}

@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Redirecting…</title>
+    <meta http-equiv="refresh" content="0; url=./hu/index.html">
+    <script>
+    (function () {
+        var saved = null;
+        try { saved = localStorage.getItem('portfolio-lang'); } catch (e) {}
+        var browser = (navigator.language || navigator.userLanguage || 'hu').toLowerCase();
+        var lang = saved || (browser.indexOf('de') === 0 ? 'de' : (browser.indexOf('en') === 0 ? 'en' : 'hu'));
+        var target = lang === 'de' ? './de/index.html' : (lang === 'en' ? './en/index.html' : './hu/index.html');
+        window.location.replace(target);
+    })();
+    </script>
+</head>
+<body>
+    <p>Redirecting to the portfolio… <a href="./hu/index.html">Open Hungarian version</a></p>
+</body>
+</html>
