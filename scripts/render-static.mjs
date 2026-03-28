@@ -111,6 +111,7 @@ async function renderHome(lang, githubProjects) {
 async function renderWork(lang, githubProjects, meta) {
   const pagePath = path.join(ROOT, lang, 'work.html');
   let html = await fs.readFile(pagePath, 'utf8');
+  html = ensureSyncIntroSection(html);
   const manualCategories = extractManualCategories(html);
   const categories = orderCategories([...manualCategories, ...githubProjects.map((project) => project.category)]);
 
@@ -119,6 +120,26 @@ async function renderWork(lang, githubProjects, meta) {
   html = replaceBetweenMarkers(html, 'GITHUB_PROJECTS', githubProjects.map((project, index) => renderWorkCard(project, index, lang)).join('\n'));
 
   await fs.writeFile(pagePath, html, 'utf8');
+}
+
+function ensureSyncIntroSection(html) {
+  if (html.includes('<!-- GITHUB_SYNC_INTRO_START -->') && html.includes('<!-- GITHUB_SYNC_INTRO_END -->')) {
+    return html;
+  }
+
+  const markerBlock = [
+    '<section class="section-block">',
+    '    <div class="container-lg">',
+    '        <div class="github-sync-intro-card reveal">',
+    '            <!-- GITHUB_SYNC_INTRO_START -->',
+    '            <!-- GITHUB_SYNC_INTRO_END -->',
+    '        </div>',
+    '    </div>',
+    '</section>',
+    '',
+  ].join('\n');
+
+  return html.replace(/(<\/section>\s*)(<section class="section-block">)/, `$1\n${markerBlock}$2`);
 }
 
 function renderFilterButtons(categories, lang) {
