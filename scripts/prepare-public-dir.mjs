@@ -7,6 +7,14 @@ const __dirname = path.dirname(__filename);
 const ROOT = path.resolve(__dirname, '..');
 const PUBLIC_DIR = path.join(ROOT, 'public');
 
+async function main() {
+  await fs.access(PUBLIC_DIR);
+  await fs.access(path.join(PUBLIC_DIR, 'index.html'));
+  console.log('Public Pages directory is ready.');
+}
+
+await main();
+
 const EXCLUDE = new Set([
   '.git',
   '.github',
