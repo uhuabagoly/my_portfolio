@@ -271,6 +271,16 @@ code {
     font-size: 1.04rem;
 }
 
+.hero-section .page-title,
+.page-hero .page-title {
+    font-size: clamp(3.8rem, 7.6vw, 6.7rem);
+}
+
+.hero-section .page-title,
+.page-hero .page-title {
+    font-size: clamp(3.8rem, 7.6vw, 6.7rem);
+}
+
 .hero-actions,
 .cta-actions,
 .project-links,
@@ -934,6 +944,8 @@ code {
 
 .social-links {
     justify-content: flex-end;
+    position: relative;
+    z-index: 1;
 }
 
 .social-links a {
