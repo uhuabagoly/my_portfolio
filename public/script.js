@@ -29,6 +29,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    setupNavigationSound();
     refreshGithubProjectStats();
 });
 
@@ -36,9 +37,11 @@ async function refreshGithubProjectStats() {
     const githubCards = [...document.querySelectorAll('[data-github-repo]')];
     if (!githubCards.length) return;
 
-    const uniqueRepos = [...new Set(githubCards
-        .map((card) => card.getAttribute('data-github-repo'))
-        .filter(Boolean))];
+    const uniqueRepos = [...new Set(
+        githubCards
+            .map((card) => card.getAttribute('data-github-repo'))
+            .filter(Boolean)
+    )];
 
     const results = await Promise.all(uniqueRepos.map(fetchGithubRepoStats));
     const repoStats = new Map(results.filter(Boolean).map((item) => [item.repo, item.stats]));
@@ -57,7 +60,7 @@ async function fetchGithubRepoStats(repo) {
     try {
         const response = await fetch(`https://api.github.com/repos/${repo}`, {
             headers: {
-                'Accept': 'application/vnd.github+json'
+                Accept: 'application/vnd.github+json'
             }
         });
 
@@ -121,3 +124,70 @@ function formatCompactNumber(value) {
         maximumFractionDigits: 1
     }).format(Number(value || 0));
 }
+
+function setupNavigationSound() {
+    const navigationLinks = document.querySelectorAll('a[href]');
+    const soundPath = window.location.pathname.match(/\/(hu|en|de)\//)
+        ? '../voice/mouse-click.mp3'
+        : './voice/mouse-click.mp3';
+
+    const clickSound = new Audio(soundPath);
+    clickSound.preload = 'auto';
+    clickSound.volume = 1;
+
+    clickSound.addEventListener('canplaythrough', () => {
+        console.log('Hang betoltve:', soundPath);
+    });
+
+    clickSound.addEventListener('error', () => {
+        console.error('Nem toltheto be a hangfajl:', soundPath);
+    });
+
+    navigationLinks.forEach((link) => {
+        link.addEventListener('click', async (event) => {
+            if (
+                event.defaultPrevented ||
+                event.button !== 0 ||
+                event.metaKey ||
+                event.ctrlKey ||
+                event.shiftKey ||
+                event.altKey
+            ) {
+                return;
+            }
+
+            const href = link.getAttribute('href') || '';
+            const target = link.getAttribute('target');
+
+            if (
+                !href ||
+                href.startsWith('#') ||
+                href.startsWith('mailto:') ||
+                href.startsWith('tel:') ||
+                href.startsWith('javascript:') ||
+                link.hasAttribute('download')
+            ) {
+                return;
+            }
+
+            event.preventDefault();
+
+            try {
+                clickSound.pause();
+                clickSound.currentTime = 0;
+                await clickSound.play();
+            } catch (err) {
+                console.error('A hang lejatszasa sikertelen:', err);
+            }
+
+            setTimeout(() => {
+                if (target === '_blank') {
+                    window.open(link.href, '_blank', 'noopener,noreferrer');
+                } else {
+                    window.location.href = link.href;
+                }
+            }, 300);
+        });
+    });
+}
+
