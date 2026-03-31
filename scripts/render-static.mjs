@@ -101,23 +101,35 @@ async function main() {
 }
 
 async function renderHome(lang, githubProjects) {
-  const pagePath = path.join(ROOT, lang, 'index.html');
+  const pagePath = path.join(ROOT, 'public', lang, 'index.html');
   let html = await fs.readFile(pagePath, 'utf8');
-  const cards = githubProjects.slice(0, 3).map((project, index) => renderHomeCard(project, index, lang)).join('\n');
+  const cards = githubProjects
+    .slice(0, 3)
+    .map((project, index) => renderHomeCard(project, index, lang))
+    .join('\n');
+
   html = replaceBetweenMarkers(html, 'GITHUB_FEATURED', cards);
   await fs.writeFile(pagePath, html, 'utf8');
 }
 
 async function renderWork(lang, githubProjects, meta) {
-  const pagePath = path.join(ROOT, lang, 'work.html');
+  const pagePath = path.join(ROOT, 'public', lang, 'work.html');
   let html = await fs.readFile(pagePath, 'utf8');
+
   html = ensureSyncIntroSection(html);
   const manualCategories = extractManualCategories(html);
-  const categories = orderCategories([...manualCategories, ...githubProjects.map((project) => project.category)]);
+  const categories = orderCategories([
+    ...manualCategories,
+    ...githubProjects.map((project) => project.category),
+  ]);
 
   html = replaceBetweenMarkers(html, 'PROJECT_FILTERS', renderFilterButtons(categories, lang));
   html = replaceBetweenMarkers(html, 'GITHUB_SYNC_INTRO', renderSyncIntro(meta, githubProjects, lang));
-  html = replaceBetweenMarkers(html, 'GITHUB_PROJECTS', githubProjects.map((project, index) => renderWorkCard(project, index, lang)).join('\n'));
+  html = replaceBetweenMarkers(
+    html,
+    'GITHUB_PROJECTS',
+    githubProjects.map((project, index) => renderWorkCard(project, index, lang)).join('\n')
+  );
 
   await fs.writeFile(pagePath, html, 'utf8');
 }
