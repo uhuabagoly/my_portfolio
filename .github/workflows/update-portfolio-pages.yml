@@ -40,8 +40,12 @@ jobs:
       - name: Render static pages from synced data
         run: node ./scripts/render-static.mjs
 
-      - name: Prepare public Pages directory
-        run: node ./scripts/prepare-public-dir.mjs
+      - name: Debug public structure
+        run: |
+          echo "PUBLIC:"
+          ls -la ./public
+          echo "TREE:"
+          find ./public -maxdepth 3 -type f | sort
 
       - name: Upload GitHub Pages artifact
         uses: actions/upload-pages-artifact@v4
