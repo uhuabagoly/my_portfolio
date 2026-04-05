@@ -34,6 +34,10 @@ const TEXT = {
     curated: 'Kurálva',
     status: 'Állapot',
     syncIntro: (count, last) => `A felület most láthatóvá teszi a szinkront: ${count}, Az utolsó rögzített frissítés ideje: ${last}.`,
+    featuredEmptyTitle: 'Még nincs pinned projekt',
+    featuredEmptyCopy: 'Pinelj repókat a GitHub profilodon, és itt automatikusan csak azok jelennek meg.',
+    mediaPlay: 'Play',
+    mediaStop: 'Stop',
   },
   en: {
     all: 'All',
@@ -58,6 +62,10 @@ const TEXT = {
     curated: 'Curated',
     status: 'Status',
     syncIntro: (count, last) => `The interface now makes the sync visible: ${count}, Last recorded update: ${last}.`,
+    featuredEmptyTitle: 'No pinned projects yet',
+    featuredEmptyCopy: 'Pin repositories on your GitHub profile and only those will appear here automatically.',
+    mediaPlay: 'Play',
+    mediaStop: 'Stop',
   },
   de: {
     all: 'Alle',
@@ -82,6 +90,10 @@ const TEXT = {
     curated: 'Kuratiert',
     status: 'Status',
     syncIntro: (count, last) => `Die Oberfläche macht die Synchronisierung sichtbar: ${count}, Letzte gespeicherte Aktualisierung: ${last}.`,
+    featuredEmptyTitle: 'Noch keine angehefteten Projekte',
+    featuredEmptyCopy: 'Hefte Repositories in deinem GitHub-Profil an, dann erscheinen hier automatisch nur diese.',
+    mediaPlay: 'Play',
+    mediaStop: 'Stop',
   },
 };
 
@@ -103,10 +115,9 @@ async function main() {
 async function renderHome(lang, githubProjects) {
   const pagePath = path.join(ROOT, 'public', lang, 'index.html');
   let html = await fs.readFile(pagePath, 'utf8');
-  const cards = githubProjects
-    .slice(0, 3)
+  const cards = selectPinnedProjects(githubProjects)
     .map((project, index) => renderHomeCard(project, index, lang))
-    .join('\n');
+    .join('\n') || renderHomeEmptyState(lang);
 
   html = replaceBetweenMarkers(html, 'GITHUB_FEATURED', cards);
   await fs.writeFile(pagePath, html, 'utf8');
@@ -186,17 +197,42 @@ function renderSyncIntro(meta, githubProjects, lang) {
   ].join('\n');
 }
 
+function selectPinnedProjects(githubProjects) {
+  return githubProjects
+    .filter((project) => project?.featured)
+    .sort((a, b) => {
+      const rankA = Number.isFinite(Number(a?.pinned_rank)) ? Number(a.pinned_rank) : Number.MAX_SAFE_INTEGER;
+      const rankB = Number.isFinite(Number(b?.pinned_rank)) ? Number(b.pinned_rank) : Number.MAX_SAFE_INTEGER;
+      if (rankA !== rankB) return rankA - rankB;
+      return String(b?.updated_at || '').localeCompare(String(a?.updated_at || ''));
+    });
+}
+
+function renderHomeEmptyState(lang) {
+  const t = TEXT[lang];
+  return `                <div class="col-12">
+                    <article class="guide-card reveal">
+                        <span class="guide-label">GitHub</span>
+                        <h2>${escapeHtml(t.featuredEmptyTitle)}</h2>
+                        <p>${escapeHtml(t.featuredEmptyCopy)}</p>
+                    </article>
+                </div>`;
+}
+
 function renderHomeCard(project, index, lang) {
   const t = TEXT[lang];
   const isGithub = project.source === 'github';
   const languageOrType = project.language || project.year || project.type || '';
-  const thumbClass = project.image_source === 'readme' ? ' readme-thumb' : '';
   const tags = Array.isArray(project.tags) ? project.tags : [];
   const repoName = project.github_full_name || '';
 
   return `                <div class="col-lg-4 col-md-6">
                     <article class="project-card reveal reveal-delay-${Math.min(index + 1, 3)} ${escapeHtml(project.accent || 'accent-red')}"${repoName ? ` data-github-repo="${escapeHtml(repoName)}"` : ''}>
-                        ${project.image ? `<div class="project-thumb${thumbClass}"><img src="${escapeHtml(project.image)}" alt="${escapeHtml(project.title)}" loading="lazy"></div>` : `<div class="project-thumb project-thumb-placeholder ${escapeHtml(project.accent || 'accent-red')}"><span class="placeholder-kicker">${escapeHtml(isGithub ? t.placeholderGithub : t.placeholderManual)}</span><strong>${escapeHtml(projectMonogram(project.title))}</strong><small>${escapeHtml(project.type || '')}</small></div>`}
+                        ${renderProjectMedia(project, lang, {
+                          context: 'home',
+                          index,
+                          placeholderLabel: isGithub ? t.placeholderGithub : t.placeholderManual,
+                        })}
                         <div class="project-body">
                             <div class="project-stamp">
                                 <span>0${index + 1}</span>
@@ -223,20 +259,23 @@ function renderWorkCard(project, index, lang) {
   const pushed = formatDate(project.updated_at, lang, { year: 'numeric', month: '2-digit', day: '2-digit' }) || '—';
   const visibility = t.visibility[String(project.visibility || 'public').toLowerCase()] || String(project.visibility || 'public');
   const descriptionSource = project.description_source || 'GitHub metadata';
-  const thumbClass = project.image_source === 'readme' ? ' readme-thumb' : '';
   const chipSync = project.sync_note ? `<span class="github-chip">${escapeHtml(project.sync_note)}</span>` : '';
   const topics = Array.isArray(project.topics) ? project.topics.slice(0, 4) : [];
   const repoName = project.github_full_name || '';
+  const thumbOverlay = `                            <div class="project-thumb-overlay">
+                                <span class="guide-label">${escapeHtml(t.exhibition)}</span>
+                                <strong>${escapeHtml(project.github_full_name || project.title)}</strong>
+                            </div>`;
 
   return `                <div class="col-12 project-item" data-category="${escapeHtml(project.category || 'system')}">
                     <article class="project-card project-card-large github-gallery-card reveal reveal-delay-${Math.min((index % 3) + 1, 3)} ${escapeHtml(project.accent || 'accent-red')}"${repoName ? ` data-github-repo="${escapeHtml(repoName)}"` : ''}>
-                        <div class="project-thumb project-thumb-large${thumbClass}">
-                            ${project.image ? `<img src="${escapeHtml(project.image)}" alt="${escapeHtml(project.title)}" loading="lazy">` : ''}
-                            <div class="project-thumb-overlay">
-                                <span class="guide-label">${escapeHtml(t.exhibition)}</span>
-                                <strong>${escapeHtml(project.github_full_name || project.title)}</strong>
-                            </div>
-                        </div>
+                        ${renderProjectMedia(project, lang, {
+                          context: 'work',
+                          index,
+                          large: true,
+                          overlayHtml: thumbOverlay,
+                          placeholderLabel: t.placeholderGithub,
+                        })}
                         <div class="project-body">
                             <div class="project-topline">
                                 <div class="project-stamp wide">
@@ -300,6 +339,90 @@ function replaceBetweenMarkers(html, markerName, innerHtml) {
 
   const normalized = innerHtml ? `\n${innerHtml}\n                ` : '\n';
   return html.replace(pattern, `$1${normalized}$3`);
+}
+
+function renderProjectMedia(project, lang, options = {}) {
+  if (hasProjectVideo(project)) {
+    return renderProjectVideo(project, lang, options);
+  }
+
+  if (project.image) {
+    return renderProjectImage(project, options);
+  }
+
+  return renderProjectPlaceholder(project, options);
+}
+
+function renderProjectImage(project, options = {}) {
+  const classes = ['project-thumb'];
+  if (options.large) classes.push('project-thumb-large');
+  if (project.image_source === 'readme') classes.push('readme-thumb');
+
+  return `<div class="${classes.join(' ')}"><img src="${escapeHtml(project.image)}" alt="${escapeHtml(project.title)}" loading="lazy">${options.overlayHtml || ''}</div>`;
+}
+
+function renderProjectVideo(project, lang, options = {}) {
+  const t = TEXT[lang];
+  const classes = ['project-thumb'];
+  if (options.large) classes.push('project-thumb-large');
+  classes.push('project-media-frame');
+
+  const mediaId = buildProjectMediaId(project, options.context || 'project', options.index || 0);
+  const fallbackImage = project.poster_image || project.image;
+  const fallbackHtml = fallbackImage
+    ? `<img class="project-media-fallback" src="${escapeHtml(fallbackImage)}" alt="${escapeHtml(project.title)}" loading="lazy">`
+    : renderProjectPlaceholder(project, options, true);
+
+  let playerHtml = '';
+  if (project.media_provider === 'youtube' && project.media_id && project.media_embed_url) {
+    playerHtml = `<div class="project-media-player project-media-player-youtube" id="${escapeHtml(mediaId)}" data-video-id="${escapeHtml(project.media_id)}" data-embed-url="${escapeHtml(project.media_embed_url)}"></div>`;
+  } else if ((project.media_provider === 'mp4' || project.media_provider === 'webm') && project.media_url) {
+    playerHtml = `<video class="project-media-player project-media-player-native" muted loop playsinline preload="metadata"${project.poster_image ? ` poster="${escapeHtml(project.poster_image)}"` : ''}>
+                                <source src="${escapeHtml(project.media_url)}" type="${escapeHtml(resolveVideoMimeType(project.media_provider))}">
+                            </video>`;
+  }
+
+  if (!playerHtml) {
+    return project.image ? renderProjectImage(project, options) : renderProjectPlaceholder(project, options);
+  }
+
+  return `<div class="${classes.join(' ')}" data-project-media data-media-provider="${escapeHtml(project.media_provider || '')}" data-playback="playing">
+                            ${fallbackHtml}
+                            ${playerHtml}
+                            <button class="project-media-toggle" type="button" hidden data-play-label="${escapeHtml(t.mediaPlay)}" data-stop-label="${escapeHtml(t.mediaStop)}">${escapeHtml(t.mediaStop)}</button>
+                            ${options.overlayHtml || ''}
+                        </div>`;
+}
+
+function renderProjectPlaceholder(project, options = {}, fallbackOnly = false) {
+  const classes = ['project-thumb'];
+  if (options.large) classes.push('project-thumb-large');
+  classes.push('project-thumb-placeholder', escapeHtml(project.accent || 'accent-red'));
+  if (fallbackOnly) classes.push('project-media-fallback', 'project-media-fallback-placeholder');
+
+  return `<div class="${classes.join(' ')}"><span class="placeholder-kicker">${escapeHtml(options.placeholderLabel || 'Project')}</span><strong>${escapeHtml(projectMonogram(project.title))}</strong><small>${escapeHtml(project.type || '')}</small></div>`;
+}
+
+function hasProjectVideo(project) {
+  return project?.media_type === 'video'
+    && Boolean(project.media_provider)
+    && Boolean(project.media_url || project.media_embed_url);
+}
+
+function resolveVideoMimeType(provider) {
+  if (provider === 'webm') return 'video/webm';
+  return 'video/mp4';
+}
+
+function buildProjectMediaId(project, context, index) {
+  return `project-media-${sanitizeDomToken(context)}-${sanitizeDomToken(project.github_full_name || project.title)}-${index}`;
+}
+
+function sanitizeDomToken(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'item';
 }
 
 function projectMonogram(title) {

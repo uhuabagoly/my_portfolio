@@ -29,9 +29,13 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    setupProjectMedia();
     setupNavigationSound();
     refreshGithubProjectStats();
 });
+
+let youtubeApiPromise = null;
+const youtubePlayers = new Map();
 
 async function refreshGithubProjectStats() {
     const githubCards = [...document.querySelectorAll('[data-github-repo]')];
@@ -123,6 +127,193 @@ function formatCompactNumber(value) {
         notation: 'compact',
         maximumFractionDigits: 1
     }).format(Number(value || 0));
+}
+
+function setupProjectMedia() {
+    const mediaCards = [...document.querySelectorAll('[data-project-media]')];
+    if (!mediaCards.length) return;
+
+    const youtubeCards = [];
+
+    mediaCards.forEach((card) => {
+        const provider = card.dataset.mediaProvider;
+        if (provider === 'youtube') {
+            youtubeCards.push(card);
+            return;
+        }
+
+        setupNativeProjectMedia(card);
+    });
+
+    if (youtubeCards.length) {
+        setupYoutubeProjectMedia(youtubeCards);
+    }
+}
+
+function setupNativeProjectMedia(card) {
+    const video = card.querySelector('.project-media-player-native');
+    const button = card.querySelector('.project-media-toggle');
+    if (!video) return;
+
+    const markReady = () => {
+        card.classList.add('is-media-ready');
+        if (button) button.hidden = false;
+    };
+
+    video.muted = true;
+    video.loop = true;
+    video.playsInline = true;
+
+    video.addEventListener('loadeddata', () => {
+        markReady();
+        playNativeVideo(video, card, button);
+    }, { once: true });
+
+    video.addEventListener('error', () => {
+        markMediaFallback(card, button);
+    }, { once: true });
+
+    if (button) {
+        button.addEventListener('click', () => {
+            if (card.dataset.playback === 'playing') {
+                video.pause();
+                setMediaPlaybackState(card, button, false);
+            } else {
+                playNativeVideo(video, card, button);
+            }
+        });
+    }
+}
+
+function playNativeVideo(video, card, button) {
+    const playAttempt = video.play();
+
+    if (playAttempt && typeof playAttempt.then === 'function') {
+        playAttempt
+            .then(() => {
+                setMediaPlaybackState(card, button, true);
+            })
+            .catch(() => {
+                setMediaPlaybackState(card, button, false);
+            });
+        return;
+    }
+
+    setMediaPlaybackState(card, button, true);
+}
+
+function setupYoutubeProjectMedia(cards) {
+    loadYoutubeApi()
+        .then(() => {
+            cards.forEach((card) => createYoutubePlayer(card));
+        })
+        .catch(() => {
+            cards.forEach((card) => {
+                markMediaFallback(card, card.querySelector('.project-media-toggle'));
+            });
+        });
+}
+
+function loadYoutubeApi() {
+    if (window.YT && typeof window.YT.Player === 'function') {
+        return Promise.resolve(window.YT);
+    }
+
+    if (youtubeApiPromise) {
+        return youtubeApiPromise;
+    }
+
+    youtubeApiPromise = new Promise((resolve, reject) => {
+        const existingScript = document.querySelector('script[data-youtube-api]');
+        if (existingScript) {
+            existingScript.addEventListener('error', reject, { once: true });
+            window.onYouTubeIframeAPIReady = () => resolve(window.YT);
+            return;
+        }
+
+        const script = document.createElement('script');
+        script.src = 'https://www.youtube.com/iframe_api';
+        script.async = true;
+        script.dataset.youtubeApi = 'true';
+        script.addEventListener('error', reject, { once: true });
+        window.onYouTubeIframeAPIReady = () => resolve(window.YT);
+        document.head.appendChild(script);
+    });
+
+    return youtubeApiPromise;
+}
+
+function createYoutubePlayer(card) {
+    const host = card.querySelector('.project-media-player-youtube');
+    const button = card.querySelector('.project-media-toggle');
+    const videoId = host?.dataset.videoId;
+
+    if (!host || !videoId || !(window.YT && typeof window.YT.Player === 'function')) {
+        markMediaFallback(card, button);
+        return;
+    }
+
+    const player = new window.YT.Player(host.id, {
+        videoId,
+        playerVars: {
+            autoplay: 1,
+            controls: 0,
+            disablekb: 1,
+            fs: 0,
+            loop: 1,
+            modestbranding: 1,
+            mute: 1,
+            playlist: videoId,
+            playsinline: 1,
+            rel: 0
+        },
+        events: {
+            onReady: (event) => {
+                youtubePlayers.set(card, event.target);
+                card.classList.add('is-media-ready');
+                if (button) button.hidden = false;
+                event.target.mute();
+                event.target.playVideo();
+                setMediaPlaybackState(card, button, true);
+            },
+            onError: () => {
+                markMediaFallback(card, button);
+            }
+        }
+    });
+
+    if (button) {
+        button.addEventListener('click', () => {
+            const currentPlayer = youtubePlayers.get(card) || player;
+            if (!currentPlayer) return;
+
+            if (card.dataset.playback === 'playing') {
+                currentPlayer.pauseVideo();
+                setMediaPlaybackState(card, button, false);
+            } else {
+                currentPlayer.mute();
+                currentPlayer.playVideo();
+                setMediaPlaybackState(card, button, true);
+            }
+        });
+    }
+}
+
+function markMediaFallback(card, button) {
+    card.classList.add('is-media-fallback');
+    card.dataset.playback = 'fallback';
+    if (button) button.hidden = true;
+}
+
+function setMediaPlaybackState(card, button, isPlaying) {
+    card.dataset.playback = isPlaying ? 'playing' : 'stopped';
+    if (!button) return;
+
+    const playLabel = button.dataset.playLabel || 'Play';
+    const stopLabel = button.dataset.stopLabel || 'Stop';
+    button.hidden = false;
+    button.textContent = isPlaying ? stopLabel : playLabel;
+    button.setAttribute('aria-pressed', isPlaying ? 'true' : 'false');
 }
 
 function setupNavigationSound() {
