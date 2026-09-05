@@ -6,6 +6,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const ROOT = path.resolve(__dirname, '..');
 const DATA_DIR = path.join(ROOT, 'data');
+const PINNED_PATH = path.join(ROOT, 'public', 'data', 'pinned.json');
 
 const LANGS = ['hu', 'en', 'de'];
 const CATEGORY_ORDER = ['web', 'python', 'game', 'hardware', 'system'];
@@ -100,22 +101,29 @@ const TEXT = {
 async function main() {
   const projects = await readJson(path.join(DATA_DIR, 'projects.json'), []);
   const meta = await readJson(path.join(DATA_DIR, 'github_sync_meta.json'), {});
+  const pinnedData = await readJson(PINNED_PATH, null);
   const githubProjects = projects
     .filter((project) => project?.source === 'github')
     .sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')));
 
   for (const lang of LANGS) {
-    await renderHome(lang, githubProjects);
+    await renderHome(lang, githubProjects, pinnedData);
     await renderWork(lang, githubProjects, meta);
   }
 
   console.log('Static HTML refreshed from data/projects.json.');
 }
 
-async function renderHome(lang, githubProjects) {
+async function renderHome(lang, githubProjects, pinnedData) {
   const pagePath = path.join(ROOT, 'public', lang, 'index.html');
   let html = await fs.readFile(pagePath, 'utf8');
-  const cards = selectPinnedProjects(githubProjects)
+
+  if (!isUsablePinnedData(pinnedData)) {
+    console.warn(`Pinned data is not ready; keeping existing static TOP fallback for ${lang}.`);
+    return;
+  }
+
+  const cards = selectPinnedProjects(githubProjects, pinnedData.repositories)
     .map((project, index) => renderHomeCard(project, index, lang))
     .join('\n') || renderHomeEmptyState(lang);
 
@@ -197,15 +205,34 @@ function renderSyncIntro(meta, githubProjects, lang) {
   ].join('\n');
 }
 
-function selectPinnedProjects(githubProjects) {
+function selectPinnedProjects(githubProjects, pinnedNames) {
+  const pinnedOrder = new Map(
+    (Array.isArray(pinnedNames) ? pinnedNames : [])
+      .map((fullName, index) => [normalizeRepoKey(fullName), index])
+      .filter(([key]) => Boolean(key))
+  );
+
   return githubProjects
-    .filter((project) => project?.featured)
-    .sort((a, b) => {
-      const rankA = Number.isFinite(Number(a?.pinned_rank)) ? Number(a.pinned_rank) : Number.MAX_SAFE_INTEGER;
-      const rankB = Number.isFinite(Number(b?.pinned_rank)) ? Number(b.pinned_rank) : Number.MAX_SAFE_INTEGER;
-      if (rankA !== rankB) return rankA - rankB;
-      return String(b?.updated_at || '').localeCompare(String(a?.updated_at || ''));
-    });
+    .filter((project) => pinnedOrder.has(normalizeRepoKey(project?.github_full_name)))
+    .map((project) => ({
+      ...project,
+      featured: true,
+      pinned_rank: pinnedOrder.get(normalizeRepoKey(project?.github_full_name)),
+      sync_note: 'Pinned on GitHub profile',
+    }))
+    .sort((a, b) => Number(a.pinned_rank) - Number(b.pinned_rank));
+}
+
+function isUsablePinnedData(payload) {
+  return Boolean(
+    payload &&
+    Array.isArray(payload.repositories) &&
+    ['github-graphql-pinnedItems', 'github-profile-html'].includes(payload.source)
+  );
+}
+
+function normalizeRepoKey(value) {
+  return String(value || '').trim().toLowerCase();
 }
 
 function renderHomeEmptyState(lang) {

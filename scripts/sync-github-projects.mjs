@@ -21,25 +21,12 @@ const CONFIG = {
     process.env.GITHUB_TOKEN ||
     '',
   repoLimit: Number(process.env.PORTFOLIO_REPO_LIMIT || 100),
-  includeForks: false,
-  includeArchived: false,
+  includeForks: true,
+  includeArchived: true,
   readmeCharLimit: Number(process.env.PORTFOLIO_README_CHAR_LIMIT || 220),
 };
 
 const ACCENTS = ['accent-red', 'accent-orange', 'accent-yellow'];
-const PINNED_REPOSITORIES_QUERY = `
-  query PortfolioPinnedRepositories($login: String!) {
-    user(login: $login) {
-      pinnedItems(first: 6, types: REPOSITORY) {
-        nodes {
-          ... on Repository {
-            nameWithOwner
-          }
-        }
-      }
-    }
-  }
-`;
 
 async function main() {
   await fs.mkdir(DATA_DIR, { recursive: true });
@@ -52,29 +39,21 @@ async function main() {
     existingProjects = [];
   }
 
-  const existingGithubProjects = existingProjects.filter((project) => project?.source === 'github');
   const manualProjects = existingProjects.filter((project) => project?.source !== 'github');
 
   try {
-    const pinnedState = await fetchPinnedRepositoryState(CONFIG, existingGithubProjects);
     const repos = await fetchRepositories(CONFIG);
-    const allRepos = await includePinnedRepositories(repos, pinnedState.names, CONFIG);
-    const pinnedRepoOrder = new Map(
-      pinnedState.names.map((fullName, index) => [normalizeRepoKey(fullName), index])
-    );
     const githubProjects = [];
 
-    for (const [index, repo] of allRepos.entries()) {
+    for (const [index, repo] of repos.entries()) {
       const manifest = await fetchOptionalManifest(repo, CONFIG);
-      if (manifest?.hidden === true) continue;
       const readme = await fetchReadmeBundle(repo, CONFIG);
       githubProjects.push(
         buildProject(
           repo,
           manifest,
           readme,
-          index,
-          pinnedRepoOrder
+          index
         )
       );
     }
@@ -86,10 +65,8 @@ async function main() {
       status: 'ok',
       last_synced: new Date().toISOString(),
       imported_count: githubProjects.length,
-      repo_count: allRepos.length,
+      repo_count: repos.length,
       manifest_count: githubProjects.filter((item) => item.__hasManifest).length,
-      pinned_count: pinnedState.names.length,
-      pinned_source: pinnedState.source,
       username: CONFIG.username,
       cache_file: 'data/projects.json',
       message: 'GitHub projects were imported successfully with repo stats and README-backed descriptions.',
@@ -128,28 +105,6 @@ function apiHeaders(config, extra = {}) {
   }
 
   return headers;
-}
-
-async function fetchGraphql(query, variables, config) {
-  const response = await fetch('https://api.github.com/graphql', {
-    method: 'POST',
-    headers: apiHeaders(config, {
-      'Content-Type': 'application/json',
-    }),
-    body: JSON.stringify({ query, variables }),
-  });
-
-  if (!response.ok) {
-    const message = await response.text();
-    throw new Error(`GitHub GraphQL hiba (${response.status}): ${message.slice(0, 160)}`);
-  }
-
-  const payload = await response.json();
-  if (Array.isArray(payload?.errors) && payload.errors.length) {
-    throw new Error(payload.errors.map((item) => item?.message || 'Unknown GraphQL error').join('; '));
-  }
-
-  return payload?.data || null;
 }
 
 async function fetchJson(url, config, extraHeaders = {}) {
@@ -192,70 +147,6 @@ async function fetchRepositories(config) {
   }
 
   return repos;
-}
-
-async function fetchPinnedRepositoryState(config, existingGithubProjects) {
-  const cachedNames = existingGithubProjects
-    .filter((project) => project?.featured && project?.github_full_name)
-    .sort((a, b) => Number(a.pinned_rank ?? 9999) - Number(b.pinned_rank ?? 9999))
-    .map((project) => project.github_full_name);
-
-  if (!config.token) {
-    return {
-      names: cachedNames,
-      source: cachedNames.length ? 'cache' : 'unavailable',
-    };
-  }
-
-  try {
-    const data = await fetchGraphql(PINNED_REPOSITORIES_QUERY, { login: config.username }, config);
-    const names = (data?.user?.pinnedItems?.nodes || [])
-      .map((node) => node?.nameWithOwner)
-      .filter(Boolean);
-
-    return {
-      names,
-      source: 'github',
-    };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.warn(`Pinned repositories could not be fetched, falling back to cache: ${message}`);
-
-    return {
-      names: cachedNames,
-      source: cachedNames.length ? 'cache' : 'unavailable',
-    };
-  }
-}
-
-async function includePinnedRepositories(repos, pinnedRepoNames, config) {
-  const nextRepos = [...repos];
-  const knownRepos = new Set(nextRepos.map((repo) => normalizeRepoKey(repo.full_name)));
-
-  for (const fullName of pinnedRepoNames) {
-    const repoKey = normalizeRepoKey(fullName);
-    if (!repoKey || knownRepos.has(repoKey)) continue;
-
-    try {
-      const repo = await fetchRepositoryByFullName(fullName, config);
-      if (!repo) continue;
-      nextRepos.push(repo);
-      knownRepos.add(repoKey);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      console.warn(`Pinned repository could not be imported (${fullName}): ${message}`);
-    }
-  }
-
-  return nextRepos;
-}
-
-async function fetchRepositoryByFullName(fullName, config) {
-  const [owner, name] = String(fullName || '').split('/');
-  if (!owner || !name) return null;
-
-  const url = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`;
-  return fetchJson(url, config);
 }
 
 async function fetchOptionalManifest(repo, config) {
@@ -555,9 +446,7 @@ function markdownExcerpt(markdown, limit = 220) {
   return `${text.slice(0, Math.max(0, limit - 1)).trimEnd()}…`;
 }
 
-function buildProject(repo, manifest, readme, index, pinnedRepoOrder) {
-  const repoKey = normalizeRepoKey(repo.full_name);
-  const pinnedRank = pinnedRepoOrder.has(repoKey) ? pinnedRepoOrder.get(repoKey) : null;
+function buildProject(repo, manifest, readme, index) {
   const category = normalizeCategory(manifest?.category || inferCategory(repo));
   const language = manifest?.language || repo.language || null;
   const accent = manifest?.accent || ACCENTS[index % ACCENTS.length];
@@ -597,14 +486,12 @@ function buildProject(repo, manifest, readme, index, pinnedRepoOrder) {
     topics: Array.isArray(repo.topics) ? repo.topics : [],
     live: manifest?.liveUrl || manifest?.live || repo.homepage || null,
     github: repo.html_url,
-    featured: pinnedRank !== null,
-    pinned_rank: pinnedRank,
     year: createdAt ? String(new Date(createdAt).getUTCFullYear()) : '',
     accent,
     source: 'github',
     repo: repo.name,
     github_full_name: repo.full_name,
-    sync_note: pinnedRank !== null ? 'Pinned on GitHub profile' : 'Synced straight from GitHub metadata',
+    sync_note: 'Synced straight from GitHub metadata',
     order: Number.isFinite(Number(manifest?.order)) ? Number(manifest.order) : 900,
     created_at: createdAt,
     updated_at: updatedAt,
@@ -651,9 +538,6 @@ function normalizeCategory(category) {
   return String(category || 'system').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-') || 'system';
 }
 
-function normalizeRepoKey(value) {
-  return String(value || '').trim().toLowerCase();
-}
 
 function humanRepoName(name) {
   return String(name || '')
