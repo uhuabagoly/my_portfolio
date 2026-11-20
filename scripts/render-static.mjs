@@ -7,6 +7,7 @@ const __dirname = path.dirname(__filename);
 const ROOT = path.resolve(__dirname, '..');
 const DATA_DIR = path.join(ROOT, 'data');
 const PINNED_PATH = path.join(ROOT, 'public', 'data', 'pinned.json');
+const DOWNLOADS_PATH = path.join(ROOT, 'public', 'data', 'project-downloads.json');
 
 const LANGS = ['hu', 'en', 'de'];
 const CATEGORY_ORDER = ['web', 'python', 'game', 'hardware', 'system'];
@@ -22,6 +23,7 @@ const TEXT = {
     placeholderManual: 'Kézi projekt',
     live: 'Élő oldal megnyitása',
     source: 'Repository megnyitása',
+    download: { setup: 'Telepítő letöltése', game: 'Játék letöltése' },
     forks: 'Forkok',
     watchers: 'Figyelők',
     exhibition: 'GitHub kiállítási darab',
@@ -50,6 +52,7 @@ const TEXT = {
     placeholderManual: 'Manual project',
     live: 'Open live site',
     source: 'Open repository',
+    download: { setup: 'Download installer', game: 'Download game' },
     forks: 'Forks',
     watchers: 'Watchers',
     exhibition: 'GitHub exhibition piece',
@@ -78,6 +81,7 @@ const TEXT = {
     placeholderManual: 'Manuelles Projekt',
     live: 'Live-Seite öffnen',
     source: 'Repository öffnen',
+    download: { setup: 'Installationsdatei herunterladen', game: 'Spiel herunterladen' },
     forks: 'Forks',
     watchers: 'Beobachter',
     exhibition: 'GitHub-Ausstellungsstück',
@@ -105,6 +109,11 @@ async function main() {
   const githubProjects = projects
     .filter((project) => project?.source === 'github')
     .sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')));
+
+  const downloads = Object.fromEntries(githubProjects
+    .filter((project) => project.github_full_name && project.download)
+    .map((project) => [normalizeRepoKey(project.github_full_name), project.download]));
+  await fs.writeFile(DOWNLOADS_PATH, JSON.stringify(downloads, null, 2) + '\n', 'utf8');
 
   for (const lang of LANGS) {
     await renderHome(lang, githubProjects, pinnedData);
@@ -274,7 +283,7 @@ function renderHomeCard(project, index, lang) {
                             <p>${escapeHtml(project.description || '')}</p>
                             ${isGithub ? `<div class="github-mini-stats"><span>★ ${formatCompactNumber(project.github_stats?.stars || 0)}</span><span>${escapeHtml(t.forks)} ${formatCompactNumber(project.github_stats?.forks || 0)}</span><span>${escapeHtml(t.watchers)} ${formatCompactNumber(project.github_stats?.watchers || 0)}</span></div>` : ''}
                             <div class="tag-row">${tags.map((tag) => `<span>${escapeHtml(tag)}</span>`).join('')}</div>
-                            <div class="project-links">${project.live ? `<a href="${escapeHtml(project.live)}" target="_blank" rel="noreferrer">${escapeHtml(t.live)}</a>` : ''}${project.github ? `<a href="${escapeHtml(project.github)}" target="_blank" rel="noreferrer">${escapeHtml(t.source)}</a>` : ''}</div>
+                            <div class="project-links">${renderProjectLinks(project, t)}</div>
                         </div>
                     </article>
                 </div>`;
@@ -330,13 +339,22 @@ function renderWorkCard(project, index, lang) {
                                 ${chipSync}
                             </div>
                             <div class="tag-row">${topics.map((topic) => `<span>${escapeHtml(topic)}</span>`).join('')}</div>
-                            <div class="project-links">
-                                ${project.live ? `<a href="${escapeHtml(project.live)}" target="_blank" rel="noreferrer">${escapeHtml(t.live)}</a>` : ''}
-                                ${project.github ? `<a href="${escapeHtml(project.github)}" target="_blank" rel="noreferrer">${escapeHtml(t.source)}</a>` : ''}
-                            </div>
+                            <div class="project-links">${renderProjectLinks(project, t)}</div>
                         </div>
                     </article>
                 </div>`;
+}
+
+function renderProjectLinks(project, t) {
+  const { live, github, download } = project;
+  const liveLink = live ? `<a href="${escapeHtml(live)}" target="_blank" rel="noreferrer">${escapeHtml(t.live)}</a>` : '';
+  const repositoryLink = github ? `<a href="${escapeHtml(github)}" target="_blank" rel="noreferrer">${escapeHtml(t.source)}</a>` : '';
+  const downloadLink = github && Object.hasOwn(t.download, download?.type) &&
+    typeof download.url === 'string' && download.url.startsWith(`${github}/releases/download/`)
+    ? `<a class="project-download-link" data-download-type="${escapeHtml(download.type)}" href="${escapeHtml(download.url)}" download>${escapeHtml(t.download[download.type])}</a>`
+    : '';
+
+  return liveLink + repositoryLink + downloadLink;
 }
 
 function extractManualCategories(html) {

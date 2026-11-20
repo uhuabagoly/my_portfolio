@@ -40,22 +40,24 @@ async function main() {
   }
 
   const manualProjects = existingProjects.filter((project) => project?.source !== 'github');
+  const previousGithubProjects = new Map(existingProjects
+    .filter((project) => project?.source === 'github' && typeof project.github_full_name === 'string')
+    .map((project) => [project.github_full_name.toLowerCase(), project]));
 
   try {
     const repos = await fetchRepositories(CONFIG);
     const githubProjects = [];
 
     for (const [index, repo] of repos.entries()) {
-      const manifest = await fetchOptionalManifest(repo, CONFIG);
-      const readme = await fetchReadmeBundle(repo, CONFIG);
-      githubProjects.push(
-        buildProject(
-          repo,
-          manifest,
-          readme,
-          index
-        )
-      );
+      const [manifest, readme] = await Promise.all([
+        fetchOptionalManifest(repo, CONFIG),
+        fetchReadmeBundle(repo, CONFIG),
+      ]);
+      const download = await fetchProjectDownload(repo, manifest, CONFIG).catch((error) => {
+        console.warn(`Release ellenőrzése sikertelen: ${repo.full_name} (${error.message})`);
+        return previousGithubProjects.get(repo.full_name.toLowerCase())?.download || null;
+      });
+      githubProjects.push(buildProject(repo, manifest, readme, index, download));
     }
 
     const nextProjects = [...githubProjects, ...manualProjects];
@@ -171,6 +173,67 @@ async function fetchOptionalManifest(repo, config) {
   } catch {
     return null;
   }
+}
+
+async function fetchProjectDownload(repo, manifest, config) {
+  if (repo.private) return null;
+
+  const preference = manifest?.download;
+  if (preference != null && (
+    !['setup', 'game'].includes(preference.type) ||
+    typeof preference.asset !== 'string' ||
+    !preference.asset.trim()
+  )) {
+    console.warn(`Érvénytelen download beállítás: ${repo.full_name}`);
+    return null;
+  }
+
+  const repositoryPath = repo.full_name.split('/').map(encodeURIComponent).join('/');
+  const releaseEndpoint = `https://api.github.com/repos/${repositoryPath}/releases`;
+  const downloadPrefix = `https://github.com/${repositoryPath}/releases/download/`;
+  const gameRepository = normalizeCategory(manifest?.category) === 'game' ||
+    /unity|unreal|godot|\bgames?\b/i.test([repo.name, repo.description, ...(repo.topics || [])].join(' '));
+  const pageSize = 100;
+
+  for (let page = 1; ; page += 1) {
+    const releases = await fetchJson(`${releaseEndpoint}?per_page=${pageSize}&page=${page}`, config);
+    if (!Array.isArray(releases)) throw new Error('A kiadások válasza nem lista.');
+
+    for (const release of releases) {
+      if (release.draft || release.prerelease || !release.published_at) continue;
+
+      for (const asset of release.assets || []) {
+        const url = asset.browser_download_url;
+        if (asset.state !== 'uploaded' || !(asset.size > 0) ||
+            typeof url !== 'string' || !url.startsWith(downloadPrefix)) continue;
+
+        const type = preference
+          ? resolvePreferredDownloadType(asset.name, preference)
+          : inferDownloadType(asset.name, gameRepository);
+        if (type) return { type, url };
+      }
+    }
+
+    if (releases.length < pageSize) return null;
+  }
+}
+
+function resolvePreferredDownloadType(name, preference) {
+  if (name !== preference.asset) return null;
+  const allowed = preference.type === 'setup' ? /\.(?:exe|msi)$/i : /\.(?:zip|7z|exe)$/i;
+  return allowed.test(name) ? preference.type : null;
+}
+
+function inferDownloadType(name, gameRepository) {
+  const filename = String(name || '').toLowerCase();
+  if (/(?:^|[._\s-])(?:source(?:code)?|symbols|debug|editor|sdk)(?:[._\s-]|$)/.test(filename)) return null;
+  if (filename.endsWith('.msi') ||
+      /(?:^|[._\s-])(?:setup|installer)(?=[._\s-]).*\.exe$/.test(filename)) return 'setup';
+  if (!/\.(?:zip|7z)$/.test(filename)) return null;
+
+  const playable = /(?:^|[._\s-])(?:playable|game[._\s-]?build)(?:[._\s-]|$)/.test(filename);
+  const windows = /(?:^|[._\s-])(?:windows|win64|win[._\s-]?x64)(?:[._\s-]|$)/.test(filename);
+  return playable || (gameRepository && windows) ? 'game' : null;
 }
 
 async function fetchReadmeBundle(repo, config) {
@@ -446,7 +509,7 @@ function markdownExcerpt(markdown, limit = 220) {
   return `${text.slice(0, Math.max(0, limit - 1)).trimEnd()}…`;
 }
 
-function buildProject(repo, manifest, readme, index) {
+function buildProject(repo, manifest, readme, index, download) {
   const category = normalizeCategory(manifest?.category || inferCategory(repo));
   const language = manifest?.language || repo.language || null;
   const accent = manifest?.accent || ACCENTS[index % ACCENTS.length];
@@ -486,6 +549,7 @@ function buildProject(repo, manifest, readme, index) {
     topics: Array.isArray(repo.topics) ? repo.topics : [],
     live: manifest?.liveUrl || manifest?.live || repo.homepage || null,
     github: repo.html_url,
+    ...(download ? { download } : {}),
     year: createdAt ? String(new Date(createdAt).getUTCFullYear()) : '',
     accent,
     source: 'github',

@@ -713,6 +713,29 @@ code {
     text-underline-offset: 0.18em;
 }
 
+.project-links {
+    align-items: center;
+}
+
+.project-links .project-download-link {
+    display: inline-block;
+    padding: 0.45rem 0.75rem;
+    border: 2px solid var(--ink);
+    background: var(--ink);
+    color: var(--paper);
+    text-decoration: none;
+}
+
+.project-links .project-download-link:hover {
+    background: var(--paper);
+    color: var(--ink);
+}
+
+.project-links .project-download-link:focus-visible {
+    outline: 2px solid var(--ink);
+    outline-offset: 3px;
+}
+
 .project-card-large {
     display: grid;
     grid-template-columns: minmax(320px, 0.95fr) minmax(0, 1.2fr);

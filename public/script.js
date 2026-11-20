@@ -379,6 +379,7 @@ const LIVE_GITHUB_TEXT = {
         placeholderGithub: 'GitHub projekt',
         live: 'Élő oldal megnyitása',
         source: 'Repository megnyitása',
+        download: { setup: 'Telepítő letöltése', game: 'Játék letöltése' },
         forks: 'Forkok',
         watchers: 'Figyelők',
         exhibition: 'GitHub kiállítási darab',
@@ -401,6 +402,7 @@ const LIVE_GITHUB_TEXT = {
         placeholderGithub: 'GitHub project',
         live: 'Open live site',
         source: 'Open repository',
+        download: { setup: 'Download installer', game: 'Download game' },
         forks: 'Forks',
         watchers: 'Watchers',
         exhibition: 'GitHub exhibition piece',
@@ -423,6 +425,7 @@ const LIVE_GITHUB_TEXT = {
         placeholderGithub: 'GitHub-Projekt',
         live: 'Live-Seite öffnen',
         source: 'Repository öffnen',
+        download: { setup: 'Installationsdatei herunterladen', game: 'Spiel herunterladen' },
         forks: 'Forks',
         watchers: 'Beobachter',
         exhibition: 'GitHub-Ausstellungsstück',
@@ -441,6 +444,7 @@ const LIVE_GITHUB_TEXT = {
 
 const LIVE_GITHUB_STATE = {
     projectMap: new Map(),
+    downloads: new Map(),
     topGrid: null,
     pinnedSignature: null,
     pinnedRefreshTimer: null,
@@ -455,7 +459,11 @@ async function initializeLiveGithubPortfolio() {
     if (!workGrid && !topGrid) return;
 
     try {
-        const repositories = await fetchAllPublicGithubRepositories(LIVE_GITHUB_PORTFOLIO.username);
+        const [repositories, downloads] = await Promise.all([
+            fetchAllPublicGithubRepositories(LIVE_GITHUB_PORTFOLIO.username),
+            fetchLiveProjectDownloads()
+        ]);
+        LIVE_GITHUB_STATE.downloads = downloads;
 
         // A README/portfolio.json hidratálás visszaadja a projekt saját képét,
         // videóját, leírását és egyéb metaadatait. A localStorage cache miatt
@@ -488,6 +496,25 @@ async function initializeLiveGithubPortfolio() {
     } catch (error) {
         // GitHub/API hiba esetén a statikusan generált tartalék marad a DOM-ban.
         console.error('Az élő GitHub portfólió betöltése sikertelen. A statikus tartalék megmarad.', error);
+    }
+}
+
+async function fetchLiveProjectDownloads() {
+    const path = window.location.pathname.match(/\/(hu|en|de)(?:\/|$)/)
+        ? '../data/project-downloads.json'
+        : './data/project-downloads.json';
+
+    try {
+        const response = await fetch(new URL(path, window.location.href));
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const downloads = await response.json();
+        return new Map(Object.entries(downloads));
+    } catch {
+        return new Map([...document.querySelectorAll('[data-github-repo] .project-download-link')]
+            .map((link) => [
+                normalizeRepoKeyLive(link.closest('[data-github-repo]').dataset.githubRepo),
+                { type: link.dataset.downloadType, url: link.href }
+            ]));
     }
 }
 
@@ -1080,6 +1107,7 @@ function buildLiveGithubProject(repo, manifest, readme, index, pinnedOrder) {
         topics: Array.isArray(repo.topics) ? repo.topics : [],
         live: manifest?.liveUrl || manifest?.live || repo.homepage || null,
         github: repo.html_url,
+        download: LIVE_GITHUB_STATE.downloads.get(repoKey),
         featured: pinnedRank !== null,
         pinned_rank: pinnedRank,
         year: createdAt ? String(new Date(createdAt).getUTCFullYear()) : '',
@@ -1177,10 +1205,7 @@ function renderLiveWorkCard(project, index) {
                     <span class="github-chip">${escapeHtmlLive(project.sync_note)}</span>
                 </div>
                 <div class="tag-row">${topics.map((topic) => `<span>${escapeHtmlLive(topic)}</span>`).join('')}</div>
-                <div class="project-links">
-                    ${project.live ? `<a href="${escapeHtmlLive(project.live)}" target="_blank" rel="noreferrer">${escapeHtmlLive(t.live)}</a>` : ''}
-                    <a href="${escapeHtmlLive(project.github)}" target="_blank" rel="noreferrer">${escapeHtmlLive(t.source)}</a>
-                </div>
+                <div class="project-links">${renderLiveProjectLinks(project, t)}</div>
             </div>
         </article>
     </div>`;
@@ -1202,10 +1227,22 @@ function renderLiveHomeCard(project, index) {
                 <p>${escapeHtmlLive(project.description || '')}</p>
                 <div class="github-mini-stats"><span>★ ${formatCompactNumber(project.github_stats?.stars || 0)}</span><span>${escapeHtmlLive(t.forks)} ${formatCompactNumber(project.github_stats?.forks || 0)}</span><span>${escapeHtmlLive(t.watchers)} ${formatCompactNumber(project.github_stats?.watchers || 0)}</span></div>
                 <div class="tag-row">${tags.map((tag) => `<span>${escapeHtmlLive(tag)}</span>`).join('')}</div>
-                <div class="project-links">${project.live ? `<a href="${escapeHtmlLive(project.live)}" target="_blank" rel="noreferrer">${escapeHtmlLive(t.live)}</a>` : ''}<a href="${escapeHtmlLive(project.github)}" target="_blank" rel="noreferrer">${escapeHtmlLive(t.source)}</a></div>
+                <div class="project-links">${renderLiveProjectLinks(project, t)}</div>
             </div>
         </article>
     </div>`;
+}
+
+function renderLiveProjectLinks(project, t) {
+    const { live, github, download } = project;
+    const liveLink = live ? `<a href="${escapeHtmlLive(live)}" target="_blank" rel="noreferrer">${escapeHtmlLive(t.live)}</a>` : '';
+    const repositoryLink = github ? `<a href="${escapeHtmlLive(github)}" target="_blank" rel="noreferrer">${escapeHtmlLive(t.source)}</a>` : '';
+    const downloadLink = github && Object.hasOwn(t.download, download?.type) &&
+        typeof download.url === 'string' && download.url.startsWith(`${github}/releases/download/`)
+        ? `<a class="project-download-link" data-download-type="${escapeHtmlLive(download.type)}" href="${escapeHtmlLive(download.url)}" download>${escapeHtmlLive(t.download[download.type])}</a>`
+        : '';
+
+    return liveLink + repositoryLink + downloadLink;
 }
 
 function renderLiveProjectMedia(project, options = {}) {
